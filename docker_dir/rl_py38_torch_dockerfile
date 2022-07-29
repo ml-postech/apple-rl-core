@@ -1,0 +1,59 @@
+FROM lsj/rl_base:0.1
+
+ARG PYTHON_VERSION=3.8
+ARG USER_ID
+ARG GROUP_ID
+ARG USER_NAME
+
+RUN addgroup --gid $GROUP_ID ${USER_NAME}_docker
+RUN adduser --home /app/repo  --disabled-password --gecos '' --uid $USER_ID --gid $GROUP_ID ${USER_NAME}_docker
+RUN chown -R ${USER_NAME}_docker:${USER_NAME}_docker /app
+
+RUN mkdir /opt/conda
+RUN chown -R ${USER_NAME}_docker:${USER_NAME}_docker /opt/conda
+
+RUN echo '{"file_format_version" : "1.0.0", "ICD" : {"library_path" : "libEGL_nvidia.so.0"}}' >> /usr/share/glvnd/egl_vendor.d/10_nvidia.json
+RUN chown -R ${USER_NAME}_docker:${USER_NAME}_docker /usr/share/glvnd/egl_vendor.d/
+
+RUN mkdir -p /usr/lib/nvidia-000
+RUN chown -R ${USER_NAME}_docker:${USER_NAME}_docker /usr/lib/nvidia-000
+ENV LD_LIBRARY_PATH ${LD_LIBRARY_PATH}:/usr/lib/nvidia-000
+
+USER ${USER_NAME}_docker
+
+# Install conda
+RUN curl -o ~/miniconda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh && \
+    chmod +x ~/miniconda.sh
+RUN ~/miniconda.sh -b -u -p /opt/conda && \
+    rm ~/miniconda.sh
+ENV PATH /opt/conda/bin:$PATH
+
+# Install python numpy typing
+RUN /opt/conda/bin/conda install -y python=$PYTHON_VERSION numpy typing && \
+    /opt/conda/bin/conda clean -ya
+
+# Install torch
+# https://github.com/anibali/docker-pytorch/blob/master/dockerfiles/1.7.0-cuda11.0-ubuntu20.04/Dockerfile
+ARG CUDATOOLKIT_VERSION=11.0
+ENV CONDA_OVERRIDE_CUDA=11.0
+RUN /opt/conda/bin/conda install -y -c pytorch \
+    cudatoolkit=11.0.221 \
+    "pytorch=1.7.0=py3.8_cuda11.0.221_cudnn8.0.3_0" \
+    "torchvision=0.8.1=py38_cu110" \
+ && /opt/conda/bin/conda clean -ya
+
+# Install RL benchmarks
+RUN conda install -c conda-forge gym && \
+    /opt/conda/bin/conda clean -ya
+RUN /opt/conda/bin/pip install --upgrade pip
+RUN /opt/conda/bin/pip install --no-cache-dir 'mujoco-py<2.2,>=2.1' dm_control procgen
+# RUN chmod -R 777 /opt/conda/lib/python3.8/site-packages/mujoco_py/
+
+# Install visualization and logging tools
+RUN /opt/conda/bin/conda install -y -c conda-forge matplotlib tensorboard wandb && \
+    /opt/conda/bin/conda clean -ya
+
+# docker build -t myimage:version \
+# --build-arg USER_ID=$(id -u) \
+# --build-arg GROUP_ID=$(id -g) \
+# --build-arg USER_NAME=$(whoami) .

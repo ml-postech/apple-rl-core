@@ -1,0 +1,7 @@
+FROM lsj/rl_py38_torch:0.1
+
+WORKDIR /app
+COPY conda_env.yml .
+RUN /opt/conda/bin/conda env update --name base --file conda_env.yml
+
+WORKDIR /app/repo/
