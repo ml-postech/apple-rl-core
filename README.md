@@ -1,3 +1,13 @@
+# Basic Setup
+
+Run this code to setup environment.
+
+```
+chmod +x basic_setup.sh
+./basic_setup.sh
+conda activate core
+```
+
 # CoRe: Contrastive Recurrent State-Space Models
 
 This code implements the CoRe model and reproduces experimental results found in<br>

@@ -1,0 +1,8 @@
+# Python cache
+__pycache__/
+
+# Visual Studio Code configuration
+.vscode/
+
+# artifacts
+artifacts/
