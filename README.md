@@ -8,6 +8,8 @@ chmod +x basic_setup.sh
 conda activate core
 ```
 
+Then check whether your torch use GPU by `torch.cuda.is_available()` or sth.
+
 # CoRe: Contrastive Recurrent State-Space Models
 
 This code implements the CoRe model and reproduces experimental results found in<br>
