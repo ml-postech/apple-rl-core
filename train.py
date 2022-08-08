@@ -355,7 +355,8 @@ class Trainer(object):
         if not self.debug and self.tb_writer is not None:
             for k, v in metrics.items():
                 self.tb_writer.add_scalar('metrics/{}'.format(k), v, step)
-            if heavy_logging:
+            # 비디오 저장이 안돼서 우선 생략함
+            '''if heavy_logging:
                 max_B = 16
                 self.tb_writer.add_video('obs/input',
                                          self.unnormalize(batch['obs_image']).transpose(0, 1)[:max_B], step)
@@ -365,7 +366,7 @@ class Trainer(object):
                     self.tb_writer.add_video('obs/recon_post',
                                              self.unnormalize(outputs['obs_recon_post']).transpose(0, 1)[:max_B], step)
                     self.tb_writer.add_video('obs/recon_prior',
-                                             self.unnormalize(outputs['obs_recon_prior']).transpose(0, 1)[:max_B], step)
+                                             self.unnormalize(outputs['obs_recon_prior']).transpose(0, 1)[:max_B], step)'''
         return metrics, outputs
 
     def log_video(self, video_tag, frames, step):
@@ -453,7 +454,8 @@ class Trainer(object):
                 obs_recon_prior = self.unnormalize(outputs['obs_recon_prior']).transpose(0, 1)
                 obs_recon_imagined = self.unnormalize(obs_recon_imagined).transpose(0, 1)
                 obs = torch.cat([obs, obs_recon, obs_recon_post, obs_recon_prior, obs_recon_imagined], dim=3)
-            self.log_video('obs/val', obs, step)
+            # 비디오 저장이 안돼서 우선 생략함
+            # self.log_video('obs/val', obs, step)
         return -episode_reward
 
     def collect_data_random_policy(self, replay_buffer, num_episodes_per_env=1, train=True):
