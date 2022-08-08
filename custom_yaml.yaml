@@ -1,0 +1,23 @@
+parameters:
+  seed: 42
+  env:
+    name: dcs
+    domain: cheetah
+    difficulty: hard
+    dynamic: true
+    background_dataset_path: /hdd/hdd1/lsj/DAVIS/JPEGImages/480p
+    allow_background_distraction: true
+    allow_camera_distraction: true
+    allow_color_distraction: true
+    image_height: 256
+    image_width: 256
+    num_frames_to_stack: 1
+  start_rl_training_after: 0
+  num_envs: 1
+  num_val_envs: 5  #20
+  num_episodes_per_val_env_for_reward: 1  #5
+  max_steps: 2000000  # This divided by action_repeat is the max updates.
+  episode_steps: 1000  # This divided by action_repeat is the max steps per episode.
+  update_frequency_factor: 0.5
+  initial_data_steps: 1000
+  gamma: 0.99
