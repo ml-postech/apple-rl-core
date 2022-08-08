@@ -9,9 +9,10 @@ parameters:
     allow_background_distraction: true
     allow_camera_distraction: true
     allow_color_distraction: true
-    image_height: 256
-    image_width: 256
-    num_frames_to_stack: 1
+    image_height: 100
+    image_width: 100
+    num_frames_to_stack: 3
+    image_crop_size: 84
   start_rl_training_after: 0
   num_envs: 1
   num_val_envs: 5  #20
