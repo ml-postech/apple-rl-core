@@ -14,23 +14,41 @@ import augmentations
 class SODA(SAC):
 	def __init__(self, obs_shape, action_shape, cfg: DictConfig):
 		super().__init__(obs_shape, action_shape, cfg)
-		self.aux_update_freq = cfg.aux_task.aux_update_freq
-		self.soda_batch_size = cfg.batch_size
-		self.soda_tau = cfg.tau
+		self.cfg = cfg
+		self.aux_update_freq = self.cfg.aux_task.aux_update_freq
+		self.soda_batch_size = self.cfg.batch_size
+		self.soda_tau = self.cfg.tau
+
+		self.aug_x = None
+
+		self.aug_dict = {
+			"random_crop": augmentations.random_crop,
+			"random_overlay": augmentations.random_overlay,
+			"random_conv": augmentations.random_conv,
+			"random_shift": augmentations.random_shift,
+		}
+		self.aug_list = []
+		assert self.cfg.augmentation.aug_num > 0 and self.cfg.augmentation.aug_num < 4, "aug_num has to be integer between 1 to 3"
+		self.aug_list.append(self.aug_dict[self.cfg.augmentation.first_aug])
+		if self.cfg.augmentation.second_aug != None:
+			self.aug_list.append(self.aug_dict[self.cfg.augmentation.second_aug])
+			if self.cfg.augmentation.third_aug != None:
+				self.aug_list.append(self.aug_dict[self.cfg.augmentation.third_aug])
+		assert len(self.aug_list) == self.cfg.augmentation.aug_num, "the number of augmentation methods is different with aug_num"
 
 		shared_cnn = self.critic.encoder.shared_cnn
 		aux_cnn = self.critic.encoder.head_cnn
 		soda_encoder = m.Encoder(
 			shared_cnn,
 			aux_cnn,
-			m.SODAMLP(aux_cnn.out_shape[0], cfg.architecture.projection_dim, cfg.architecture.projection_dim)
+			m.SODAMLP(aux_cnn.out_shape[0], self.cfg.architecture.projection_dim, self.cfg.architecture.projection_dim)
 		)
 
-		self.predictor = m.SODAPredictor(soda_encoder, cfg.architecture.projection_dim).cuda()
+		self.predictor = m.SODAPredictor(soda_encoder, self.cfg.architecture.projection_dim).cuda()
 		self.predictor_target = deepcopy(self.predictor)
 
 		self.soda_optimizer = torch.optim.Adam(
-			self.predictor.parameters(), lr=cfg.aux_task.aux_lr, betas=(cfg.aux_task.aux_beta, 0.999)
+			self.predictor.parameters(), lr=self.cfg.aux_task.aux_lr, betas=(self.cfg.aux_task.aux_beta, 0.999)
 		)
 		self.train()
 
@@ -52,13 +70,16 @@ class SODA(SAC):
 		x = replay_buffer.sample_soda(self.soda_batch_size)
 		assert x.size(-1) == 100
 
-		aug_x = x.clone()
+		self.aug_x = x.clone()
 
-		x = augmentations.random_crop(x)
+		'''x = augmentations.random_crop(x)
 		aug_x = augmentations.random_crop(aug_x)
-		aug_x = augmentations.random_overlay(aug_x)
+		aug_x = augmentations.random_overlay(aug_x)'''
+		x = self.aug_dict[self.cfg.anchor_augmentation](x)
+		for aug_idx in range(self.cfg.augmentation.aug_num):
+			self.aug_x = self.aug_list[aug_idx](self.aug_x)
 
-		soda_loss = self.compute_soda_loss(aug_x, x)
+		soda_loss = self.compute_soda_loss(self.aug_x, x)
 		
 		self.soda_optimizer.zero_grad()
 		soda_loss.backward()
