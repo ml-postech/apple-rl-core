@@ -57,16 +57,18 @@ _soda_cfg_dict: dict = {
         "aux_beta": 0.9,
         "aux_update_freq": 2
     },
-    "anchor_augmentation": "random_crop",
+    "anchor_augmentation": "random_overlay",
     "augmentation":{
-        "aug_num": 2,
-        "first_aug": "random_crop",
-        "second_aug": "random_overlay",
+        "aug_num": 1,
+        "first_aug": "random_conv",
+        "second_aug": None,
         "third_aug": None,
-    },
+    }, # random_crop, random_overlay, random_conv, random_shift
 }
 
 _soda_cfg = OmegaConf.create(_soda_cfg_dict)
+
+wandb_log = True
 
 
 class Trainer(object):
@@ -115,6 +117,7 @@ class Trainer(object):
         action_low, action_high = self.env.get_action_limits()
         action_dims = self.env.get_action_dims()
         start_step, episode, episode_reward, done = 0, 0, 0, True
+        update_step = 0
         
         for step in range(start_step, self.agent_cfg.train_steps+1):
             if done:
@@ -152,10 +155,11 @@ class Trainer(object):
 
             if episode_step >= max_step_per_episode - 1:
                 done = True
-                # wandb log
-                wandb.log({
-                    "episode_reward": episode_reward
-                }, step=step)
+                if wandb_log:
+                    wandb.log({
+                        "episode_reward": episode_reward
+                    }, step=update_step)
+                update_step += 1
             
             episode_step += 1
 
@@ -187,6 +191,8 @@ def main():
 
     config = config['parameters']
     config['expt_id'] = generate_expt_id()
+    
+    # does setting seed is essential?
     seed = config['seed']
     random.seed(seed)
     np.random.seed(seed)
@@ -206,7 +212,7 @@ def main():
         else:
             difficulty = config['env']['difficulty']
 
-    dynamic = config['env']['dynamic']
+    dynamic = "dynamic" if config['env']['dynamic'] is True else "static"
 
     # wandb logging
     aug_name = _agent_cfg.augmentation.first_aug[6:]
@@ -214,15 +220,18 @@ def main():
         aug_name += _agent_cfg.augmentation.second_aug[6:]
         if _agent_cfg.augmentation.third_aug is not None:
             aug_name += _agent_cfg.augmentation.third_aug[6:]
-    run_name = f"{_agent_cfg.algorithm} / {aug_name} / {domain} / {difficulty} / {dynamic} dyn / {datetime.now().isoformat(timespec='minutes')}"
+    if _agent_cfg.anchor_augmentation != "random_crop":
+        aug_name += f' + anchor{_agent_cfg.anchor_augmentation[6:]}'
+    run_name = f"{_agent_cfg.algorithm} / {aug_name} / {domain} / {difficulty} / {dynamic} / {datetime.now().isoformat(timespec='minutes')}"
     project_name = "distracting_cs_augmentation"
-    run_tags = [project_name]
-    wandb.init(
-        project=project_name,
-        name=run_name,
-        tags=run_tags,
-        reinit=True
-    )
+    run_tags = [config['env']['domain']]
+    
+    if wandb_log:
+        wandb.init(
+            project=project_name,
+            name=run_name,
+            tags=run_tags,
+        )
 
     print("start training")
     trainer.train()
