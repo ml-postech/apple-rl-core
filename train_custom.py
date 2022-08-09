@@ -1,33 +1,16 @@
-import os
 import yaml
 import argparse
 import sys
 import random
-import time
 import torch
 import wandb
 import numpy as np
-import matplotlib.pyplot as plt
-import torch.nn.functional as F
-# import pytorch_lightning as pl # https://www.pytorchlightning.ai/
 
 from datetime import datetime
-from tqdm import tqdm
-from torch import nn
 import torch.nn.functional as F
-from torch import optim
-from torch import nn
-from torch import optim
-from torch.utils.tensorboard import SummaryWriter
-from torch.utils.data import random_split
-from torchvision.datasets import FashionMNIST
-from torchvision import transforms
 
 from omegaconf import OmegaConf
 from omegaconf import DictConfig
-import hydra # https://hydra.cc/docs/intro/
-from hydra.core.config_store import ConfigStore
-from typing import Dict
 
 from utils import generate_expt_id
 from environments import make_environment
@@ -41,8 +24,8 @@ _soda_cfg_dict: dict = {
     "tau": 0.005,
     "train_steps": 500000,
     "discount": 0.99,
-    #"init_steps": 1000,
-    "init_steps": 250,
+    "init_steps": 1000,
+    #"init_steps": 250,
     "hidden_dim": 1024,
     "actor": {
         "lr": 1e-3,
@@ -74,6 +57,13 @@ _soda_cfg_dict: dict = {
         "aux_beta": 0.9,
         "aux_update_freq": 2
     },
+    "anchor_augmentation": "random_crop",
+    "augmentation":{
+        "aug_num": 2,
+        "first_aug": "random_crop",
+        "second_aug": "random_overlay",
+        "third_aug": None,
+    },
 }
 
 _soda_cfg = OmegaConf.create(_soda_cfg_dict)
@@ -83,6 +73,7 @@ class Trainer(object):
     def __init__(self, config, agent_cfg: DictConfig):
         self.config = config
         self.agent_cfg = agent_cfg
+        self.image_log = 1000
 
         self.num_envs = self.config['num_envs']
         self.num_val_envs = self.config['num_val_envs']
@@ -120,7 +111,7 @@ class Trainer(object):
         )
 
     def train(self):
-        max_step_per_episode = int(1000 / self.action_repeat)
+        max_step_per_episode = int(self.config['episode_steps'] / self.action_repeat)
         action_low, action_high = self.env.get_action_limits()
         action_dims = self.env.get_action_dims()
         start_step, episode, episode_reward, done = 0, 0, 0, True
@@ -140,7 +131,6 @@ class Trainer(object):
             else:
                 with utils.eval_mode(self.agent):
                     action = self.agent.sample_action(obs)
-                    print("start sampling")
 
             # Run training update
             if step >= self.agent_cfg.init_steps:
@@ -155,10 +145,19 @@ class Trainer(object):
             episode_reward += reward
             obs = next_obs['image']
 
-            episode_step += 1
-            print(step, episode_reward)
-            if step >= max_step_per_episode - 1:
+            '''if step >= self.agent_cfg.init_steps and step % self.image_log == 0:
+                wandb.log({
+                    "aug_image": wandb.Image(self.agent.aug_x)
+                }, step=step)'''
+
+            if episode_step >= max_step_per_episode - 1:
                 done = True
+                # wandb log
+                wandb.log({
+                    "episode_reward": episode_reward
+                }, step=step)
+            
+            episode_step += 1
 
 def argument_parser(argument):
     """ Argument parser """
@@ -193,7 +192,38 @@ def main():
     np.random.seed(seed)
     torch.manual_seed(seed)
 
-    trainer = Trainer(config, _soda_cfg)
+    # select algorithm & GPU
+    _agent_cfg = _soda_cfg
+    trainer = Trainer(config, _agent_cfg)
+
+    # select domain & difficulty & dynamic
+    domain = config['env']['domain']
+    if config['env']['difficulty'] == "None":
+        difficulty = "None"
+    else:
+        if config['env']['allow_camera_distraction'] == False:
+            difficulty = f"{config['env']['difficulty']} + no cam"
+        else:
+            difficulty = config['env']['difficulty']
+
+    dynamic = config['env']['dynamic']
+
+    # wandb logging
+    aug_name = _agent_cfg.augmentation.first_aug[6:]
+    if _agent_cfg.augmentation.second_aug is not None:
+        aug_name += _agent_cfg.augmentation.second_aug[6:]
+        if _agent_cfg.augmentation.third_aug is not None:
+            aug_name += _agent_cfg.augmentation.third_aug[6:]
+    run_name = f"{_agent_cfg.algorithm} / {aug_name} / {domain} / {difficulty} / {dynamic} dyn / {datetime.now().isoformat(timespec='minutes')}"
+    project_name = "distracting_cs_augmentation"
+    run_tags = [project_name]
+    wandb.init(
+        project=project_name,
+        name=run_name,
+        tags=run_tags,
+        reinit=True
+    )
+
     print("start training")
     trainer.train()
 
