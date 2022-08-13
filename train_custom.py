@@ -4,6 +4,7 @@ import sys
 import random
 import torch
 import wandb
+import os
 import numpy as np
 
 from datetime import datetime
@@ -20,7 +21,10 @@ import custom.utils as utils
 
 _soda_cfg_dict: dict = {
     "algorithm": "soda",
+    "pre_trained": False,
+    "pre_trained_dir": None,
     "batch_size": 256,
+    # "batch_size": 128, # https://cvml.tistory.com/24
     "tau": 0.005,
     "train_steps": 500000,
     "discount": 0.99,
@@ -57,11 +61,11 @@ _soda_cfg_dict: dict = {
         "aux_beta": 0.9,
         "aux_update_freq": 2
     },
-    "anchor_augmentation": "random_overlay",
+    "anchor_augmentation": "random_crop",
     "augmentation":{
-        "aug_num": 1,
-        "first_aug": "random_conv",
-        "second_aug": None,
+        "aug_num": 2,
+        "first_aug": "random_crop",
+        "second_aug": "random_overlay",
         "third_aug": None,
     }, # random_crop, random_overlay, random_conv, random_shift
 }
@@ -75,7 +79,6 @@ class Trainer(object):
     def __init__(self, config, agent_cfg: DictConfig):
         self.config = config
         self.agent_cfg = agent_cfg
-        self.image_log = 1000
 
         self.num_envs = self.config['num_envs']
         self.num_val_envs = self.config['num_val_envs']
@@ -92,8 +95,8 @@ class Trainer(object):
         obs_shape=(self.obs_channels, self.obs_height, self.obs_width)
         action_shape=(action_dims, )
         print(f"action_shape: {action_shape}")
-        capacity=agent_cfg['train_steps']
-        batch_size=_soda_cfg['batch_size']
+        capacity=self.agent_cfg.train_steps
+        batch_size=self.agent_cfg.batch_size
 
         self.replay_buffer = utils.ReplayBuffer(
             obs_shape=obs_shape,
@@ -109,15 +112,19 @@ class Trainer(object):
         self.agent = utils.make_agent(
             obs_shape=cropped_obs_shape,
             action_shape=action_shape,
-            cfg=_soda_cfg
+            cfg=self.agent_cfg
         )
+        if self.agent_cfg.pre_trained:
+            self.agent = torch.load(f"{self.agent_cfg.pre_trained_dir}/model.pth")
+            print("load completed")
 
-    def train(self):
+    def train(self, save_name):
         max_step_per_episode = int(self.config['episode_steps'] / self.action_repeat)
         action_low, action_high = self.env.get_action_limits()
         action_dims = self.env.get_action_dims()
         start_step, episode, episode_reward, done = 0, 0, 0, True
         update_step = 0
+        best_epi = 0
         
         for step in range(start_step, self.agent_cfg.train_steps+1):
             if done:
@@ -129,7 +136,7 @@ class Trainer(object):
                 episode += 1
 
             # Sample action for data collection
-            if step < self.agent_cfg.init_steps:
+            if step < self.agent_cfg.init_steps and not self.agent_cfg.pre_trained:
                 action = np.random.uniform(action_low, action_high, action_dims)
             else:
                 with utils.eval_mode(self.agent):
@@ -148,11 +155,6 @@ class Trainer(object):
             episode_reward += reward
             obs = next_obs['image']
 
-            '''if step >= self.agent_cfg.init_steps and step % self.image_log == 0:
-                wandb.log({
-                    "aug_image": wandb.Image(self.agent.aug_x)
-                }, step=step)'''
-
             if episode_step >= max_step_per_episode - 1:
                 done = True
                 if wandb_log:
@@ -160,6 +162,10 @@ class Trainer(object):
                         "episode_reward": episode_reward
                     }, step=update_step)
                 update_step += 1
+                if best_epi <= episode_reward:
+                    best_epi = episode_reward
+                    torch.save(self.agent, f'param/{save_name}/model.pth')
+                    print(f"best record updated: {episode_reward}")
             
             episode_step += 1
 
@@ -192,13 +198,14 @@ def main():
     config = config['parameters']
     config['expt_id'] = generate_expt_id()
     
-    # does setting seed is essential?
     seed = config['seed']
-    random.seed(seed)
+    '''random.seed(seed)
     np.random.seed(seed)
-    torch.manual_seed(seed)
+    torch.manual_seed(seed)'''
+    utils.set_seed_everywhere(seed)
 
     # select algorithm & GPU
+    _agent_cfg_dict = _soda_cfg_dict
     _agent_cfg = _soda_cfg
     trainer = Trainer(config, _agent_cfg)
 
@@ -207,14 +214,28 @@ def main():
     if config['env']['difficulty'] == "None":
         difficulty = "None"
     else:
-        if config['env']['allow_camera_distraction'] == False:
-            difficulty = f"{config['env']['difficulty']} + no cam"
-        else:
-            difficulty = config['env']['difficulty']
+        distraction_list = [config['env']['allow_background_distraction'],
+                            config['env']['allow_camera_distraction'],
+                            config['env']['allow_color_distraction']]
+        distraction_method_list = ['bg', 'cam', 'color']
+        difficulty = f"{config['env']['difficulty']}"
+        false_method_num = 0
 
+        for idx, distraction_method in enumerate(distraction_list):
+            if distraction_method is False:
+                difficulty += f' + no {distraction_method_list[idx]}'
+                false_method_num += 1
+                continue
+            true_method_idx = idx
+        if false_method_num == 2:
+            difficulty = f"{config['env']['difficulty']} + only {distraction_method_list[true_method_idx]}"
     dynamic = "dynamic" if config['env']['dynamic'] is True else "static"
 
+
     # wandb logging
+    algorithm = _agent_cfg.algorithm
+    if _agent_cfg.pre_trained:
+        algorithm = "pre_trained " + algorithm
     aug_name = _agent_cfg.augmentation.first_aug[6:]
     if _agent_cfg.augmentation.second_aug is not None:
         aug_name += _agent_cfg.augmentation.second_aug[6:]
@@ -222,7 +243,7 @@ def main():
             aug_name += _agent_cfg.augmentation.third_aug[6:]
     if _agent_cfg.anchor_augmentation != "random_crop":
         aug_name += f' + anchor{_agent_cfg.anchor_augmentation[6:]}'
-    run_name = f"{_agent_cfg.algorithm} / {aug_name} / {domain} / {difficulty} / {dynamic} / {datetime.now().isoformat(timespec='minutes')}"
+    run_name = f"{algorithm} / {aug_name} / {domain} / {difficulty} / {dynamic} / {datetime.now().isoformat(timespec='minutes')}"
     project_name = "distracting_cs_augmentation"
     run_tags = [config['env']['domain']]
     
@@ -231,10 +252,14 @@ def main():
             project=project_name,
             name=run_name,
             tags=run_tags,
+            config=_agent_cfg_dict
         )
 
+    run_name = run_name.replace('/', ',')
+    os.mkdir(f'param/{run_name}')
+
     print("start training")
-    trainer.train()
+    trainer.train(save_name=run_name)
 
 if __name__ == '__main__':
     main()
