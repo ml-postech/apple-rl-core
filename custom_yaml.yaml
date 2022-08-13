@@ -3,12 +3,12 @@ parameters:
   env:
     name: dcs
     domain: walker
-    difficulty: easy
+    difficulty: None
     dynamic: false
     background_dataset_path: /hdd/hdd1/lsj/DAVIS/JPEGImages/480p
-    allow_background_distraction: true
+    allow_background_distraction: false
     allow_camera_distraction: false
-    allow_color_distraction: true
+    allow_color_distraction: false
     image_height: 100
     image_width: 100
     num_frames_to_stack: 3
