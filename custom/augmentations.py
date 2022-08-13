@@ -12,7 +12,11 @@ places_dataloader = None
 places_iter = None
 
 
-def _load_places(batch_size=256, image_size=84, num_workers=16, use_val=False):
+def _load_places(batch_size=256, 
+				 image_size=84, 
+				 #num_workers=16, # https://kangaroo-dev.tistory.com/6
+				 num_workers=0, 
+				 use_val=False):
 	global places_dataloader, places_iter
 	partition = 'val' if use_val else 'train'
 	print(f'Loading {partition} partition of places365_standard...')
