@@ -19,8 +19,6 @@ class SODA(SAC):
 		self.soda_batch_size = self.cfg.batch_size
 		self.soda_tau = self.cfg.tau
 
-		self.aug_x = None
-
 		self.aug_dict = {
 			"random_crop": augmentations.random_crop,
 			"random_overlay": augmentations.random_overlay,
@@ -70,16 +68,16 @@ class SODA(SAC):
 		x = replay_buffer.sample_soda(self.soda_batch_size)
 		assert x.size(-1) == 100
 
-		self.aug_x = x.clone()
+		aug_x = x.clone()
 
 		'''x = augmentations.random_crop(x)
 		aug_x = augmentations.random_crop(aug_x)
 		aug_x = augmentations.random_overlay(aug_x)'''
 		x = self.aug_dict[self.cfg.anchor_augmentation](x)
 		for aug_idx in range(self.cfg.augmentation.aug_num):
-			self.aug_x = self.aug_list[aug_idx](self.aug_x)
+			aug_x = self.aug_list[aug_idx](aug_x)
 
-		soda_loss = self.compute_soda_loss(self.aug_x, x)
+		soda_loss = self.compute_soda_loss(aug_x, x)
 		
 		self.soda_optimizer.zero_grad()
 		soda_loss.backward()
