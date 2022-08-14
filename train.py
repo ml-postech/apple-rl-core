@@ -453,7 +453,7 @@ class Trainer(object):
                 obs_recon_prior = self.unnormalize(outputs['obs_recon_prior']).transpose(0, 1)
                 obs_recon_imagined = self.unnormalize(obs_recon_imagined).transpose(0, 1)
                 obs = torch.cat([obs, obs_recon, obs_recon_post, obs_recon_prior, obs_recon_imagined], dim=3)
-            self.log_video('obs/val', obs, step)
+            # self.log_video('obs/val', obs, step)
         return -episode_reward
 
     def collect_data_random_policy(self, replay_buffer, num_episodes_per_env=1, train=True):
@@ -731,17 +731,20 @@ class Trainer(object):
 
                 # Train the world model
                 if not self.exclude_wm_loss:  # Skip for model-free variants, like SAC, RSAC.
-                    self.update_world_model(batch, train_step, heavy_logging=(i == 0))
+                    # self.update_world_model(batch, train_step, heavy_logging=(i == 0))
+                    self.update_world_model(batch, train_step, heavy_logging=False)
                 tic2 = time.time()
 
                 # Train the observation encoder
                 if self.has_momentum_encoder:
-                    self.update_curl(batch, train_step, heavy_logging=(i == 0))
+                    # self.update_curl(batch, train_step, heavy_logging=(i == 0))
+                    self.update_curl(batch, train_step, heavy_logging=False)
                 tic3 = time.time()
 
                 # Train the RL agent
                 if train_step >= start_rl_training_after:
-                    self.update_actor_critic_sac(batch, train_step, heavy_logging=(i == 0))
+                    # self.update_actor_critic_sac(batch, train_step, heavy_logging=(i == 0))
+                    self.update_actor_critic_sac(batch, train_step, heavy_logging=False)
                 toc = time.time()
                 
                 timing_metrics = {
