@@ -3,7 +3,7 @@ parameters:
   env:
     name: dcs
     domain: cheetah
-    difficulty: hard
+    difficulty: medium
     dynamic: true
     background_dataset_path: /hdd/hdd1/lsj/DAVIS/JPEGImages/480p
     allow_background_distraction: true

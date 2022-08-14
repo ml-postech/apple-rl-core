@@ -21,6 +21,7 @@ from environments import make_environment
 from copy import deepcopy
 import sys
 
+import wandb
 
 class Trainer(object):
     """ Trainer for all models. """
@@ -407,7 +408,11 @@ class Trainer(object):
         # Take the first few episodes for computing the rest of the metrics. They are expensive to compute.
         num_episodes_for_model = self.config.get('num_episodes_val_for_model', 5)
         batch = replay_buffer.sample(num_episodes_for_model)
+        print(f'*** prep_batch in validate ***')
         batch = self.prep_batch(batch, random_crop=False)
+        print(f'*** prep_batch in validate ***')
+        print('\n\n')
+
         steps_per_episode = self.config['episode_steps'] // self.action_repeat
 
         if not self.exclude_wm_loss:
@@ -483,6 +488,9 @@ class Trainer(object):
         Returns:
             batch: Same dict, but with images randomly cropped, moved to GPU, normalized.
         """
+        print('Input batch.keys()')
+        print(batch.keys())
+        print()
         for key in batch.keys():
             batch[key] = batch[key].to(self.device)
         obs_image_cropped = crop_image_tensor(batch['obs_image'], self.crop_height, self.crop_width,
@@ -512,8 +520,11 @@ class Trainer(object):
         batch['obs_image'] = self.normalize(batch['obs_image'])
         if 'obs_image_clean' in batch:
             batch['obs_image_clean'] = self.normalize(batch['obs_image_clean'])
+        # TODO: this string is weird.
         if 'obs_imaage_2' in batch:
             batch['obs_image_2'] = self.normalize(batch['obs_image_2'])
+        print('Output batch.keys()')
+        print(batch.keys())
         return batch
 
     def collect_data_from_actor(self, replay_buffer, num_episodes_per_env=1, train=True, sample_policy=True):
@@ -538,7 +549,10 @@ class Trainer(object):
             for _ in range(steps_per_episode):
                 # Find the action to take for a batch of environments.
                 batch = torchify(obs_list)  # Dict of (B, ...)
+                print(f'*** prep_batch in collect_data_from_actor ***')
                 batch = self.prep_batch(batch, random_crop=False)
+                print(f'*** prep_batch in collect_data_from_actor ***')
+                print('\n\n')
                 outputs = self.observation_model(batch)
                 obs_features = outputs['obs_features']
                 if self.model is not None:  # If using a dynamics model.
@@ -726,7 +740,10 @@ class Trainer(object):
                 train_step += 1
 
                 batch = replay_buffer.sample(B, T)  # Dict of (B, T, ..)
+                print(f'*** prep_batch in train ***')
                 batch = self.prep_batch(batch, random_crop=random_crop)
+                print(f'*** prep_batch in train ***')
+                print('\n\n')
                 tic1 = time.time()
 
                 # Train the world model
@@ -795,10 +812,20 @@ def main():
     np.random.seed(seed)
     torch.manual_seed(seed)
 
+    wandb_name = f'{config["env"]["name"]}-{config["env"]["domain"]}'
+    wandb_name += f'-{config["env"]["difficulty"]}-{"dynamic" if config["env"]["difficulty"] else "static"}'
+    wandb_name += f'-{config["expt_id"]}-seed{seed}'
+    print(wandb_name)
+
+    wandb.init(
+        project="RL-DA",
+        name=wandb_name,
+        sync_tensorboard=True)
+    print('wandb init done')
+
     trainer = Trainer(config, device, args.debug)
     trainer.train()
 
-
 if __name__ == '__main__':
     main()
-
+    # python3 train.py --config configs/dcs/core.yaml
