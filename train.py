@@ -689,11 +689,15 @@ class Trainer(object):
         start_rl_training_after = self.config['start_rl_training_after']  # Used to delay rl training until world model has updated for a bit.
 
         for ii in range(num_iters):
+            ## 특정 몇 번마다 validation ##
             if ii % self.config['validate_every_iters'] == 0:
                 loss = self.validate(ii)
+                # TODO: this only validates only when the first iteration.
                 if ii == 0:
                     print('Completed validation')
                 self.save(ii, loss)
+            ## 특정 몇 번마다 validation ##
+
 
             # Collect data. One episode in each environment.
             with torch.no_grad():
@@ -707,27 +711,39 @@ class Trainer(object):
 
             if ii < initial_episodes_per_env:  # No updates until a few episodes have been collected.
                 continue
+            
+            ## Set NNs as train mode ##
             self.observation_model.train()
             if self.model is not None:
                 self.model.train()
             self.actor.train()
             self.critic.train()
+            ## Set NNs as train mode ##
+
             for i in range(num_updates_per_iter):
                 # Train world model.
                 tic = time.time()
                 train_step += 1
+
                 batch = replay_buffer.sample(B, T)  # Dict of (B, T, ..)
                 batch = self.prep_batch(batch, random_crop=random_crop)
                 tic1 = time.time()
+
+                # Train the world model
                 if not self.exclude_wm_loss:  # Skip for model-free variants, like SAC, RSAC.
                     self.update_world_model(batch, train_step, heavy_logging=(i == 0))
                 tic2 = time.time()
+
+                # Train the observation encoder
                 if self.has_momentum_encoder:
                     self.update_curl(batch, train_step, heavy_logging=(i == 0))
                 tic3 = time.time()
+
+                # Train the RL agent
                 if train_step >= start_rl_training_after:
                     self.update_actor_critic_sac(batch, train_step, heavy_logging=(i == 0))
                 toc = time.time()
+                
                 timing_metrics = {
                     'time_data_prep': tic1 - tic,
                     'time_wm_update': tic2 - tic1,

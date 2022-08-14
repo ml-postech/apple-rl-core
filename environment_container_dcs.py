@@ -50,6 +50,7 @@ class EnvironmentContainerDCS(object):
         self.env = distracting_suite.load(
             self.domain, self.task, difficulty=self.difficulty, dynamic=self.dynamic,
             background_dataset_path=self.background_dataset_path,
+            # Train mode uses videos for train, val mode just uses videos for validation.
             background_dataset_videos='train' if train else 'val',
             pixels_only=False,
             task_kwargs=task_kwargs,
