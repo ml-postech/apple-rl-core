@@ -61,6 +61,10 @@ class Trainer(object):
         chw = (self.obs_channels, self.crop_height, self.crop_width)
         self.observation_model = ObservationModel(config, chw, self.obs_other_dims)
         obs_dims = self.observation_model.output_dims
+        # print(f'self.obs_channels: {self.obs_channels}') # 3
+        # print(f'self.obs_height: {self.obs_height}') # 256
+        # print(f'self.obs_width: {self.obs_width}') # 256
+        # print(f'self.observation_model.output_dims: {self.observation_model.output_dims}') # 50
 
         # Setup Contrastive Prediction.
         self.contrastive_prediction = ContrastivePrediction(config['contrastive'], obs_dims)
@@ -262,8 +266,15 @@ class Trainer(object):
         loss_scales = self.config['loss_scales']
         eta_s = loss_scales['eta_s']
         if eta_s > 0:
+            # x: observation_model 에서 image forward 한 거.
+            # y: world model 에서 z^ 을 decode 한 거.
+            # 둘 다 self.forward_prop 에서 나온 거. 둘 다, prep_batch 된 거 쓴 거임.
             x = outputs['obs_features']
+            # print(f'x')
+            # print(f'x.shape: {x.shape}')
             y = outputs['obs_features_recon']
+            # print(f'y')
+            # print(f'y.shape: {y.shape}')
             if self.recon_from_prior:  # Skip t=0 when reconstructing from prior, because prior knows nothing at t=0.
                 x = x[1:]
                 y = y[1:]
@@ -408,10 +419,7 @@ class Trainer(object):
         # Take the first few episodes for computing the rest of the metrics. They are expensive to compute.
         num_episodes_for_model = self.config.get('num_episodes_val_for_model', 5)
         batch = replay_buffer.sample(num_episodes_for_model)
-        print(f'*** prep_batch in validate ***')
         batch = self.prep_batch(batch, random_crop=False)
-        print(f'*** prep_batch in validate ***')
-        print('\n\n')
 
         steps_per_episode = self.config['episode_steps'] // self.action_repeat
 
@@ -488,9 +496,9 @@ class Trainer(object):
         Returns:
             batch: Same dict, but with images randomly cropped, moved to GPU, normalized.
         """
-        print('Input batch.keys()')
-        print(batch.keys())
-        print()
+        # print('Input batch.keys()')
+        # print(batch.keys())
+        # print()
         for key in batch.keys():
             batch[key] = batch[key].to(self.device)
         obs_image_cropped = crop_image_tensor(batch['obs_image'], self.crop_height, self.crop_width,
@@ -523,8 +531,8 @@ class Trainer(object):
         # TODO: this string is weird.
         if 'obs_imaage_2' in batch:
             batch['obs_image_2'] = self.normalize(batch['obs_image_2'])
-        print('Output batch.keys()')
-        print(batch.keys())
+        # print('Output batch.keys()')
+        # print(batch.keys())
         return batch
 
     def collect_data_from_actor(self, replay_buffer, num_episodes_per_env=1, train=True, sample_policy=True):
@@ -549,10 +557,7 @@ class Trainer(object):
             for _ in range(steps_per_episode):
                 # Find the action to take for a batch of environments.
                 batch = torchify(obs_list)  # Dict of (B, ...)
-                print(f'*** prep_batch in collect_data_from_actor ***')
                 batch = self.prep_batch(batch, random_crop=False)
-                print(f'*** prep_batch in collect_data_from_actor ***')
-                print('\n\n')
                 outputs = self.observation_model(batch)
                 obs_features = outputs['obs_features']
                 if self.model is not None:  # If using a dynamics model.
@@ -740,10 +745,10 @@ class Trainer(object):
                 train_step += 1
 
                 batch = replay_buffer.sample(B, T)  # Dict of (B, T, ..)
-                print(f'*** prep_batch in train ***')
+
+                # prep_batch(batch, random_crop=random_crop, )
+
                 batch = self.prep_batch(batch, random_crop=random_crop)
-                print(f'*** prep_batch in train ***')
-                print('\n\n')
                 tic1 = time.time()
 
                 # Train the world model

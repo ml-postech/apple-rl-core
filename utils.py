@@ -7,6 +7,7 @@ import string
 import time
 import torch
 from torchvision.transforms import Resize, RandomCrop, CenterCrop
+from torchvision.transforms import ColorJitter, RandomPerspective, RandomAffine
 import subprocess as sp
 import numpy as np
 import os
@@ -145,6 +146,7 @@ def crop_image_tensor(obs, crop_height, crop_width, random_crop=False, same_crop
         cropped_obs: (B, T, C, crop_height, crop_width)
     """
     assert len(obs.shape) >= 3
+    # print(f'obs.shape: {obs.shape}') # obs.shape: torch.Size([1, 3, 256, 256])
     channels, height, width = obs.shape[-3], obs.shape[-2], obs.shape[-1]
     if random_crop:
         transform = RandomCrop((crop_height, crop_width), padding=padding, padding_mode='edge')
@@ -160,7 +162,62 @@ def crop_image_tensor(obs, crop_height, crop_width, random_crop=False, same_crop
     else:
         transform = CenterCrop((crop_height, crop_width))
         cropped_obs = transform(obs)
+    # print(f'cropped_obs.shape: {cropped_obs.shape}') # cropped_obs.shape: torch.Size([1, 3, 84, 84])
     return cropped_obs
+
+
+def color_jitter_after_resize_image_tensor(obs, height, width):
+    """
+    Color jitter a tensor of images after resize.
+    Args:
+        obs: (B, T, C, H, W), or (B, C, H, W) or (C, H, W).
+        height: Height of the resized image.
+        width: Width of the resized image.
+    Returns:
+        jittered: (B, T, C, height, width)
+    """
+    assert len(obs.shape) >= 3
+
+    resized_images = resize_image(obs, height, width)
+    jitter = ColorJitter(brightness=.5, contrast=.1, saturation=.3, hue=.3)
+    jittered = jitter(resized_images)
+
+    return jittered
+
+
+def random_perspective_after_resize_image_tensor(obs, height, width):
+    """
+    Apply random perspective transformation to a tensor of images after resize.
+    Args:
+        obs: (B, T, C, H, W), or (B, C, H, W) or (C, H, W).
+        height: Height of the resized image.
+        width: Width of the resized image.
+    Returns:
+        augmented: (B, T, C, height, width)
+    """
+    assert len(obs.shape) >= 3
+
+    resized_images = resize_image(obs, height, width)
+    random_perspective = RandomPerspective(distortion_scale=0.6)
+    augmented = random_perspective(resized_images)
+
+    return augmented
+
+def random_affine_after_resize_image_tensor(obs, height, width):
+    """
+    Apply random affine transformation to a tensor of images after resize.
+    Args:
+        obs: (B, T, C, H, W), or (B, C, H, W) or (C, H, W).
+        height: Height of the resized image.
+        width: Width of the resized image.
+    Returns:
+        augmented: (B, T, C, height, width)
+    """
+    assert len(obs.shape) >= 3
+    resized_images = resize_image(obs, height, width)
+    random_perspective = RandomAffine(degrees=70, translate=(0.3, 0.3), scale=(0.5, 1.0))
+    augmented = random_perspective(resized_images)
+    return augmented
 
 
 def get_parameter_list(optimizer):
