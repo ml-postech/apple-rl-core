@@ -816,14 +816,15 @@ class Trainer(object):
             ## Set NNs as train mode ##
 
             for i in range(num_updates_per_iter):
-                # Train world model.
-                tic = time.time()
-                train_step += 1
-
-                batch = replay_buffer.sample(B, T)  # Dict of (B, T, ..)
-
                 # TODO: Make this code reabable.
                 for jj in range(4):
+                    # Train world model.
+                    # TODO: Revise this. train_step is weird
+                    tic = time.time()
+                    train_step += 1
+
+                    batch = replay_buffer.sample(B, T)  # Dict of (B, T, ..)
+
                     if jj == 0:
                         batch = self.batch_crop(batch, random_crop=True)
                     elif jj == 1:
@@ -880,8 +881,8 @@ def argument_parser(argument):
 def main():
     args = argument_parser(None)
     if not args.disable_cuda and torch.cuda.is_available():
-        device = torch.device('cuda')
-        print('Running on GPU {}'.format(torch.cuda.get_device_name(0)))
+        device = torch.device('cuda:1')
+        print('Running on GPU {}'.format(torch.cuda.get_device_name(1)))
     else:
         device = torch.device('cpu')
         print('Running on CPU')
@@ -901,7 +902,7 @@ def main():
     np.random.seed(seed)
     torch.manual_seed(seed)
 
-    wandb_name = f'{config["env"]["name"]}-{config["env"]["domain"]}'
+    wandb_name = f'4Aug-{config["env"]["name"]}-{config["env"]["domain"]}'
     wandb_name += f'-{config["env"]["difficulty"]}-{"dynamic" if config["env"]["difficulty"] else "static"}'
     wandb_name += f'-{config["expt_id"]}-seed{seed}'
     print(wandb_name)

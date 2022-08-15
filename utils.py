@@ -178,11 +178,17 @@ def color_jitter_after_resize_image_tensor(obs, height, width):
     """
     assert len(obs.shape) >= 3
 
-    resized_images = resize_image(obs, height, width)
-    jitter = ColorJitter(brightness=.5, contrast=.1, saturation=.3, hue=.3)
-    jittered = jitter(resized_images)
+    orig_shape = list(obs.shape)
+    C, H, W = orig_shape[-3:]
+    temp = obs.view(-1, C, H, W)
 
-    return jittered
+    resize_op = Resize((height, width))
+    resized = resize_op(temp)
+    jitter_op = ColorJitter(brightness=.5, contrast=.1, saturation=.3, hue=.3)
+    augmented = jitter_op(resized)
+
+    output = augmented.view(*orig_shape[:-2], height, width)
+    return output
 
 
 def random_perspective_after_resize_image_tensor(obs, height, width):
@@ -197,11 +203,18 @@ def random_perspective_after_resize_image_tensor(obs, height, width):
     """
     assert len(obs.shape) >= 3
 
-    resized_images = resize_image(obs, height, width)
-    random_perspective = RandomPerspective(distortion_scale=0.6)
-    augmented = random_perspective(resized_images)
+    orig_shape = list(obs.shape)
+    C, H, W = orig_shape[-3:]
+    temp = obs.view(-1, C, H, W)
 
-    return augmented
+    resize_op = Resize((height, width))
+    resized = resize_op(temp)
+    perspective_op = RandomPerspective(distortion_scale=0.6)
+    augmented = perspective_op(resized)
+
+    output = augmented.view(*orig_shape[:-2], height, width)
+    return output
+
 
 def random_affine_after_resize_image_tensor(obs, height, width):
     """
@@ -214,10 +227,18 @@ def random_affine_after_resize_image_tensor(obs, height, width):
         augmented: (B, T, C, height, width)
     """
     assert len(obs.shape) >= 3
-    resized_images = resize_image(obs, height, width)
-    random_perspective = RandomAffine(degrees=70, translate=(0.3, 0.3), scale=(0.5, 1.0))
-    augmented = random_perspective(resized_images)
-    return augmented
+
+    orig_shape = list(obs.shape)
+    C, H, W = orig_shape[-3:]
+    temp = obs.view(-1, C, H, W)
+
+    resize_op = Resize((height, width))
+    resized = resize_op(temp)
+    affine_op = RandomAffine(degrees=70, translate=(0.3, 0.3), scale=(0.5, 1.0))
+    augmented = affine_op(resized)
+
+    output = augmented.view(*orig_shape[:-2], height, width)
+    return output
 
 
 def get_parameter_list(optimizer):
