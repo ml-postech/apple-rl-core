@@ -17,6 +17,7 @@ from torch.utils.tensorboard import SummaryWriter
 import time
 import random
 from utils import write_video_mp4, torchify, add_weight_decay, generate_expt_id, crop_image_tensor, get_parameter_list
+from utils import color_jitter_after_resize_image_tensor, random_perspective_after_resize_image_tensor, random_affine_after_resize_image_tensor
 from environments import make_environment
 from copy import deepcopy
 import sys
@@ -821,46 +822,49 @@ class Trainer(object):
 
                 batch = replay_buffer.sample(B, T)  # Dict of (B, T, ..)
 
-                # TODO: 여기가 고쳐야 할 부분임
-                # prep_batch(batch, random_crop=random_crop, )
+                # TODO: Make this code reabable.
+                for jj in range(4):
+                    if jj == 0:
+                        batch = self.batch_crop(batch, random_crop=True)
+                    elif jj == 1:
+                        batch = self.batch_transform(batch, color_jitter_after_resize_image_tensor)
+                    elif jj == 2:
+                        batch = self.batch_transform(batch, random_perspective_after_resize_image_tensor)
+                    else:
+                        batch = self.batch_transform(batch, random_affine_after_resize_image_tensor)
+                    batch = self.batch_finalize(batch)
 
-                # batch = self.prep_batch_crop(batch, random_crop=random_crop)
-                # batch = self.prep_batch_color_jitter(batch, random_crop=random_crop)
-                # batch = self.prep_batch_(batch, random_crop=random_crop)
-                batch = self.batch_crop(batch, random_crop=False)
-                batch = self.batch_finalize(batch)
-                tic1 = time.time()
+                    tic1 = time.time()
+                    # Train the world model
+                    if not self.exclude_wm_loss:  # Skip for model-free variants, like SAC, RSAC.
+                        # self.update_world_model(batch, train_step, heavy_logging=(i == 0))
+                        self.update_world_model(batch, train_step, heavy_logging=False)
+                    tic2 = time.time()
 
-                # Train the world model
-                if not self.exclude_wm_loss:  # Skip for model-free variants, like SAC, RSAC.
-                    # self.update_world_model(batch, train_step, heavy_logging=(i == 0))
-                    self.update_world_model(batch, train_step, heavy_logging=False)
-                tic2 = time.time()
+                    # Train the observation encoder
+                    if self.has_momentum_encoder:
+                        # self.update_curl(batch, train_step, heavy_logging=(i == 0))
+                        self.update_curl(batch, train_step, heavy_logging=False)
+                    tic3 = time.time()
 
-                # Train the observation encoder
-                if self.has_momentum_encoder:
-                    # self.update_curl(batch, train_step, heavy_logging=(i == 0))
-                    self.update_curl(batch, train_step, heavy_logging=False)
-                tic3 = time.time()
-
-                # Train the RL agent
-                if train_step >= start_rl_training_after:
-                    # self.update_actor_critic_sac(batch, train_step, heavy_logging=(i == 0))
-                    self.update_actor_critic_sac(batch, train_step, heavy_logging=False)
-                toc = time.time()
-                
-                timing_metrics = {
-                    'time_data_prep': tic1 - tic,
-                    'time_wm_update': tic2 - tic1,
-                    'time_curl_update': tic3 - tic2,
-                    'time_ac_update': toc - tic3,
-                    'time_per_update': toc - tic,
-                }
-                if not self.debug and self.tb_writer is not None:
-                    for k, v in timing_metrics.items():
-                        self.tb_writer.add_scalar('timing_metrics/{}'.format(k), v, train_step)
-                if train_step == 1:
-                    print('Completed one step')
+                    # Train the RL agent
+                    if train_step >= start_rl_training_after:
+                        # self.update_actor_critic_sac(batch, train_step, heavy_logging=(i == 0))
+                        self.update_actor_critic_sac(batch, train_step, heavy_logging=False)
+                    toc = time.time()
+                    
+                    timing_metrics = {
+                        'time_data_prep': tic1 - tic,
+                        'time_wm_update': tic2 - tic1,
+                        'time_curl_update': tic3 - tic2,
+                        'time_ac_update': toc - tic3,
+                        'time_per_update': toc - tic,
+                    }
+                    if not self.debug and self.tb_writer is not None:
+                        for k, v in timing_metrics.items():
+                            self.tb_writer.add_scalar('timing_metrics/{}'.format(k), v, train_step)
+                    if train_step == 1:
+                        print('Completed one step')
 
 
 def argument_parser(argument):
