@@ -419,7 +419,8 @@ class Trainer(object):
         # Take the first few episodes for computing the rest of the metrics. They are expensive to compute.
         num_episodes_for_model = self.config.get('num_episodes_val_for_model', 5)
         batch = replay_buffer.sample(num_episodes_for_model)
-        batch = self.prep_batch(batch, random_crop=False)
+        batch = self.batch_crop(batch, random_crop=False)
+        batch = self.batch_finalize(batch)
 
         steps_per_episode = self.config['episode_steps'] // self.action_repeat
 
@@ -489,16 +490,13 @@ class Trainer(object):
         avg_reward = total_reward / (num_episodes_per_env * len(env_containers))
         return avg_reward
 
-    def prep_batch(self, batch, random_crop=False):
+    def batch_crop(self, batch, random_crop=False):
         """ Prepare batch of data for input to the model.
         Inputs:
             batch : Dict containing 'obs', etc.
         Returns:
             batch: Same dict, but with images randomly cropped, moved to GPU, normalized.
         """
-        # print('Input batch.keys()')
-        # print(batch.keys())
-        # print()
         for key in batch.keys():
             batch[key] = batch[key].to(self.device)
         obs_image_cropped = crop_image_tensor(batch['obs_image'], self.crop_height, self.crop_width,
@@ -515,25 +513,101 @@ class Trainer(object):
             batch['obs_image_clean'] = crop_image_tensor(batch['obs_image_clean'], self.crop_height, self.crop_width, random_crop=False, same_crop_across_time=True, padding=0)
         else:
             batch['obs_image_clean'] = crop_image_tensor(batch['obs_image'], self.crop_height, self.crop_width, random_crop=False, same_crop_across_time=True, padding=0)
-
+        
         batch['obs_image'] = obs_image_cropped
+        return batch
+
+    def batch_transform(self, batch, transform):
+        """ Prepare batch of data for input to the model.
+        Inputs:
+            batch : Dict containing 'obs', etc.
+            transform: function, one of 'color_jitter_after_resize_image_tensor',
+                                        'random_perspective_after_resize_image_tensor',
+                                        'random_affine_after_resize_image_tensor'.
+        Returns:
+            batch: Same dict, but with images transformed, moved to GPU, normalized.
+        """
+        for key in batch.keys():
+            batch[key] = batch[key].to(self.device)
+
+        obs_image_transformed = transform(batch['obs_image'], self.crop_height, self.crop_width)
+        if self.has_momentum_encoder:
+            batch['obs_image_2'] = transform(batch['obs_image'], self.crop_height, self.crop_width)
+
+        if 'obs_image_clean' in batch:  # When we have paired distraction-free and distracting obs.
+            batch['obs_image_clean'] = transform(batch['obs_image_clean'], self.crop_height, self.crop_width)
+        else:
+            batch['obs_image_clean'] = transform(batch['obs_image'], self.crop_height, self.crop_width)
+        
+        batch['obs_image'] = obs_image_transformed
+        return batch
+    
+    def batch_finalize(self, batch):
+        """
+        """
         if len(batch['obs_image'].shape) == 5:  # (B, T, C, H, W) -> (T, B, C, H, W)
             swap_first_two_dims = True
         else:  # (B, C, H, W) -> no change.
             swap_first_two_dims = False
+
         for key in batch.keys():
             if swap_first_two_dims:
                 batch[key] = batch[key].transpose(0, 1)
             batch[key] = batch[key].contiguous().float().detach()
+
         batch['obs_image'] = self.normalize(batch['obs_image'])
+
         if 'obs_image_clean' in batch:
             batch['obs_image_clean'] = self.normalize(batch['obs_image_clean'])
-        # TODO: this string is weird.
-        if 'obs_imaage_2' in batch:
+        if 'obs_image_2' in batch:
             batch['obs_image_2'] = self.normalize(batch['obs_image_2'])
-        # print('Output batch.keys()')
-        # print(batch.keys())
         return batch
+
+    # def prep_batch(self, batch, random_crop=False):
+    #     """ Prepare batch of data for input to the model.
+    #     Inputs:
+    #         batch : Dict containing 'obs', etc.
+    #     Returns:
+    #         batch: Same dict, but with images randomly cropped, moved to GPU, normalized.
+    #     """
+    #     # print('Input batch.keys()')
+    #     # print(batch.keys())
+    #     # print()
+    #     for key in batch.keys():
+    #         batch[key] = batch[key].to(self.device)
+    #     obs_image_cropped = crop_image_tensor(batch['obs_image'], self.crop_height, self.crop_width,
+    #                                            random_crop=random_crop,
+    #                                            same_crop_across_time=self.same_crop_across_time,
+    #                                            padding=self.random_crop_padding)
+    #     if self.has_momentum_encoder:
+    #         batch['obs_image_2'] = crop_image_tensor(batch['obs_image'], self.crop_height, self.crop_width,
+    #                                                random_crop=random_crop,
+    #                                                same_crop_across_time=self.same_crop_across_time,
+    #                                                padding=self.random_crop_padding)
+
+    #     if 'obs_image_clean' in batch:  # When we have paired distraction-free and distracting obs.
+    #         batch['obs_image_clean'] = crop_image_tensor(batch['obs_image_clean'], self.crop_height, self.crop_width, random_crop=False, same_crop_across_time=True, padding=0)
+    #     else:
+    #         batch['obs_image_clean'] = crop_image_tensor(batch['obs_image'], self.crop_height, self.crop_width, random_crop=False, same_crop_across_time=True, padding=0)
+
+    #     batch['obs_image'] = obs_image_cropped
+    #     if len(batch['obs_image'].shape) == 5:  # (B, T, C, H, W) -> (T, B, C, H, W)
+    #         swap_first_two_dims = True
+    #     else:  # (B, C, H, W) -> no change.
+    #         swap_first_two_dims = False
+    #     for key in batch.keys():
+    #         if swap_first_two_dims:
+    #             batch[key] = batch[key].transpose(0, 1)
+    #         batch[key] = batch[key].contiguous().float().detach()
+    #     batch['obs_image'] = self.normalize(batch['obs_image'])
+    #     if 'obs_image_clean' in batch:
+    #         batch['obs_image_clean'] = self.normalize(batch['obs_image_clean'])
+    #     # TODO: this string is weird.
+    #     if 'obs_imaage_2' in batch:
+    #         batch['obs_image_2'] = self.normalize(batch['obs_image_2'])
+    #     # print('Output batch.keys()')
+    #     # print(batch.keys())
+    #     return batch
 
     def collect_data_from_actor(self, replay_buffer, num_episodes_per_env=1, train=True, sample_policy=True):
         steps_per_episode = self.config['episode_steps'] // self.action_repeat
@@ -557,7 +631,8 @@ class Trainer(object):
             for _ in range(steps_per_episode):
                 # Find the action to take for a batch of environments.
                 batch = torchify(obs_list)  # Dict of (B, ...)
-                batch = self.prep_batch(batch, random_crop=False)
+                batch = self.batch_crop(batch, random_crop=False)
+                batch = self.batch_finalize(batch)
                 outputs = self.observation_model(batch)
                 obs_features = outputs['obs_features']
                 if self.model is not None:  # If using a dynamics model.
@@ -746,9 +821,14 @@ class Trainer(object):
 
                 batch = replay_buffer.sample(B, T)  # Dict of (B, T, ..)
 
+                # TODO: 여기가 고쳐야 할 부분임
                 # prep_batch(batch, random_crop=random_crop, )
 
-                batch = self.prep_batch(batch, random_crop=random_crop)
+                # batch = self.prep_batch_crop(batch, random_crop=random_crop)
+                # batch = self.prep_batch_color_jitter(batch, random_crop=random_crop)
+                # batch = self.prep_batch_(batch, random_crop=random_crop)
+                batch = self.batch_crop(batch, random_crop=False)
+                batch = self.batch_finalize(batch)
                 tic1 = time.time()
 
                 # Train the world model
