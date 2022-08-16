@@ -22,10 +22,10 @@ import custom.utils as utils
 
 _soda_cfg_dict: dict = {
     "algorithm": "soda",
-    "train": False,
-    "eval": True,
+    "train": True,
+    "eval": False,
     "eval_freq": 1,
-    "pre_trained": True,
+    "pre_trained": False,
     "pre_trained_dir": "/home/guest-cch/apple-rl-core/param/soda , _crop_overlay , walker , None , static , 2022-08-15T08:09",
     # "batch_size": 256,
     "batch_size": 128, # https://bskyvision.com/entry/python-MemoryError-Unable-to-allocate-array-with-shape-and-data-type-%ED%95%B4%EA%B2%B0%EB%B2%95
@@ -93,7 +93,7 @@ class Trainer(object):
         seed = self.config['seed']
         self.train_env_containers = [make_environment(self.config['env'], train=True, seed=seed+i) for i in range(self.num_envs)]
         seed += self.num_envs
-        self.val_env_containers = [make_environment(self.config['env'], train=False, seed=seed+i) for i in range(self.num_val_envs)]
+        self.val_env_containers = [make_environment(self.config['val_env'], train=False, seed=seed+i) for i in range(self.num_val_envs)]
         self.env = self.train_env_containers[0]
         self.eval_env = self.val_env_containers[0]
         self.action_repeat = self.env.get_action_repeat()
