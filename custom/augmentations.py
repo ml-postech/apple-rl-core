@@ -11,6 +11,7 @@ import os
 places_dataloader = None
 places_iter = None
 
+# affine, perspective, jitter
 
 def _load_places(batch_size=256, 
 				 image_size=84, 
