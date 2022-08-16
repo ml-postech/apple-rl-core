@@ -1,3 +1,4 @@
+from turtle import update
 import yaml
 import argparse
 import sys
@@ -21,10 +22,13 @@ import custom.utils as utils
 
 _soda_cfg_dict: dict = {
     "algorithm": "soda",
-    "pre_trained": False,
-    "pre_trained_dir": None,
-    "batch_size": 256,
-    # "batch_size": 128, # https://cvml.tistory.com/24
+    "train": False,
+    "eval": True,
+    "eval_freq": 1,
+    "pre_trained": True,
+    "pre_trained_dir": "/home/guest-cch/apple-rl-core/param/soda , _crop_overlay , walker , None , static , 2022-08-15T08:09",
+    # "batch_size": 256,
+    "batch_size": 128, # https://bskyvision.com/entry/python-MemoryError-Unable-to-allocate-array-with-shape-and-data-type-%ED%95%B4%EA%B2%B0%EB%B2%95
     "tau": 0.005,
     "train_steps": 500000,
     "discount": 0.99,
@@ -32,14 +36,16 @@ _soda_cfg_dict: dict = {
     #"init_steps": 250,
     "hidden_dim": 1024,
     "actor": {
-        "lr": 1e-3,
+        # "lr": 1e-3,
+        "lr": 5e-4,
         "beta": 0.9,
         "log_std_min": -10,
         "log_std_max": 2,
         "update_freq": 2,
     },
     "critic": {
-        "lr": 1e-3,
+        # "lr": 1e-3,
+        "lr": 5e-4,
         "beta": 0.9,
         "tau": 0.01,
         "target_update_freq": 2,
@@ -53,11 +59,13 @@ _soda_cfg_dict: dict = {
     },
     "entropy_maximization": {
         "init_temperature": 0.1,
-        "alpha_lr": 1e-4,
+        # "alpha_lr": 1e-4,
+        "alpha_lr": 5e-5,
         "alpha_beta": 0.5,
     },
     "aux_task": {
-        "aux_lr": 1e-3,
+        # "aux_lr": 1e-3,
+        "aux_lr": 5e-4,
         "aux_beta": 0.9,
         "aux_update_freq": 2
     },
@@ -87,10 +95,18 @@ class Trainer(object):
         seed += self.num_envs
         self.val_env_containers = [make_environment(self.config['env'], train=False, seed=seed+i) for i in range(self.num_val_envs)]
         self.env = self.train_env_containers[0]
+        self.eval_env = self.val_env_containers[0]
         self.action_repeat = self.env.get_action_repeat()
         action_dims = self.env.get_action_dims()
         self.obs_channels, self.obs_height, self.obs_width = self.env.get_obs_chw()
         self.obs_other_dims = self.env.get_obs_other_dims()
+
+        self.best_after_interval = 100
+        self.best_update_step = 0
+
+        self.train_flag = self.agent_cfg.train
+        self.eval_flag = self.agent_cfg.eval
+        self.eval_freq = self.agent_cfg.eval_freq
 
         obs_shape=(self.obs_channels, self.obs_height, self.obs_width)
         action_shape=(action_dims, )
@@ -127,47 +143,68 @@ class Trainer(object):
         best_epi = 0
         
         for step in range(start_step, self.agent_cfg.train_steps+1):
-            if done:
-                obs = self.env.reset()
-                obs = obs['image']
-                done = False
-                episode_reward = 0
-                episode_step = 0
-                episode += 1
-
-            # Sample action for data collection
-            if step < self.agent_cfg.init_steps and not self.agent_cfg.pre_trained:
-                action = np.random.uniform(action_low, action_high, action_dims)
-            else:
-                with utils.eval_mode(self.agent):
-                    action = self.agent.sample_action(obs)
-
-            # Run training update
-            if step >= self.agent_cfg.init_steps:
-                num_updates = self.agent_cfg.init_steps if step == self.agent_cfg.init_steps else 1
-                for _ in range(num_updates):
-                    self.agent.update(self.replay_buffer, step)
-
-            # Take step
-            next_obs, reward, done, _ = self.env.step(action)
-            done_bool = 0 if episode_step + 1 == self.config['episode_steps'] else float(done)
-            self.replay_buffer.add(obs, action, reward, next_obs['image'], done_bool)
-            episode_reward += reward
-            obs = next_obs['image']
-
-            if episode_step >= max_step_per_episode - 1:
-                done = True
+            if self.eval_flag and step % self.eval_freq == 0:
+                eval_obs = self.eval_env.reset()
+                eval_obs = eval_obs['image']
+                eval_episode_reward = 0
+                for eval_episode_step in range(max_step_per_episode):
+                    with utils.eval_mode(self.agent):
+                        eval_action = self.agent.select_action(eval_obs)
+                    eval_obs, eval_reward, eval_done, _ = self.eval_env.step(eval_action)
+                    eval_obs = eval_obs['image']
+                    eval_episode_reward += eval_reward
                 if wandb_log:
-                    wandb.log({
-                        "episode_reward": episode_reward
-                    }, step=update_step)
-                update_step += 1
-                if best_epi <= episode_reward:
-                    best_epi = episode_reward
-                    torch.save(self.agent, f'param/{save_name}/model.pth')
-                    print(f"best record updated: {episode_reward}")
+                    wandb.log({"eval_episode_reward": eval_episode_reward}, 
+                              step=step)
             
-            episode_step += 1
+            if self.train_flag:
+                if done:
+                    obs = self.env.reset()
+                    obs = obs['image']
+                    done = False
+                    episode_reward = 0
+                    episode_step = 0
+                    episode += 1
+
+                # Sample action for data collection
+                if step < self.agent_cfg.init_steps and not self.agent_cfg.pre_trained:
+                    action = np.random.uniform(action_low, action_high, action_dims)
+                else:
+                    with utils.eval_mode(self.agent):
+                        action = self.agent.sample_action(obs)
+
+                # Run training update
+                if step >= self.agent_cfg.init_steps:
+                    num_updates = self.agent_cfg.init_steps if step == self.agent_cfg.init_steps else 1
+                    for _ in range(num_updates):
+                        self.agent.update(self.replay_buffer, step)
+
+                # Take step
+                next_obs, reward, done, _ = self.env.step(action)
+                done_bool = 0 if episode_step + 1 == self.config['episode_steps'] else float(done)
+                self.replay_buffer.add(obs, action, reward, next_obs['image'], done_bool)
+                episode_reward += reward
+                obs = next_obs['image']
+
+                if episode_step >= max_step_per_episode - 1:
+                    done = True
+                    if wandb_log:
+                        wandb.log({
+                            "episode_reward": episode_reward
+                        }, step=update_step)
+                    update_step += 1
+                    if best_epi <= episode_reward:
+                        best_epi = episode_reward
+                        torch.save(self.agent, f'param/{save_name}/model.pth')
+                        print(f"best record updated: {episode_reward}")
+
+                    if update_step - self.best_update_step >= self.best_after_interval:
+                        self.best_update_step = update_step
+                        torch.save(self.agent, f'param/{save_name}/best_model_after_{self.best_after_interval}_step.pth')
+                
+                episode_step += 1
+            
+        torch.save(self.agent, f'param/{save_name}/final_model.pth')
 
 def argument_parser(argument):
     """ Argument parser """
@@ -246,7 +283,7 @@ def main():
     run_name = f"{algorithm} / {aug_name} / {domain} / {difficulty} / {dynamic} / {datetime.now().isoformat(timespec='minutes')}"
     project_name = "distracting_cs_augmentation"
     run_tags = [config['env']['domain']]
-    
+
     if wandb_log:
         wandb.init(
             project=project_name,
