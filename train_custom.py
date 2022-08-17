@@ -22,9 +22,11 @@ import custom.utils as utils
 
 _soda_cfg_dict: dict = {
     "algorithm": "soda",
+    "aux_thred": False,
+    "aux_thred_value": 0,
     "train": True,
-    "eval": False,
-    "eval_freq": 1,
+    "eval": True,
+    "eval_freq": 5,
     "pre_trained": False,
     "pre_trained_dir": "/home/guest-cch/apple-rl-core/param/soda , _crop_overlay , walker , None , static , 2022-08-15T08:09",
     # "batch_size": 256,
@@ -102,7 +104,7 @@ class Trainer(object):
         self.obs_other_dims = self.env.get_obs_other_dims()
 
         self.best_after_interval = 100
-        self.best_update_step = 0
+        self.best_epi_idx = 0
 
         self.train_flag = self.agent_cfg.train
         self.eval_flag = self.agent_cfg.eval
@@ -138,24 +140,43 @@ class Trainer(object):
         max_step_per_episode = int(self.config['episode_steps'] / self.action_repeat)
         action_low, action_high = self.env.get_action_limits()
         action_dims = self.env.get_action_dims()
-        start_step, episode, episode_reward, done = 0, 0, 0, True
-        update_step = 0
-        best_epi = 0
+        start_step, episode_reward, done = 0, 0, True
+        logged_epi_idx = 1
+        best_epi_reward = 0
+
+        first_train_update_end = False
         
         for step in range(start_step, self.agent_cfg.train_steps+1):
             if self.eval_flag and step % self.eval_freq == 0:
-                eval_obs = self.eval_env.reset()
-                eval_obs = eval_obs['image']
-                eval_episode_reward = 0
-                for eval_episode_step in range(max_step_per_episode):
-                    with utils.eval_mode(self.agent):
-                        eval_action = self.agent.select_action(eval_obs)
-                    eval_obs, eval_reward, eval_done, _ = self.eval_env.step(eval_action)
+                if self.train_flag:
+                    if first_train_update_end:
+                        eval_obs = self.eval_env.reset()
+                        eval_obs = eval_obs['image']
+                        eval_episode_reward = 0
+                        for eval_episode_step in range(max_step_per_episode):
+                            with utils.eval_mode(self.agent):
+                                eval_action = self.agent.select_action(eval_obs)
+                            eval_obs, eval_reward, eval_done, _ = self.eval_env.step(eval_action)
+                            eval_obs = eval_obs['image']
+                            eval_episode_reward += eval_reward
+                        if wandb_log:
+                            wandb.log({"eval_episode_reward": eval_episode_reward}, 
+                                      step=logged_epi_idx)
+                    else: pass
+
+                else:
+                    eval_obs = self.eval_env.reset()
                     eval_obs = eval_obs['image']
-                    eval_episode_reward += eval_reward
-                if wandb_log:
-                    wandb.log({"eval_episode_reward": eval_episode_reward}, 
-                              step=step)
+                    eval_episode_reward = 0
+                    for eval_episode_step in range(max_step_per_episode):
+                        with utils.eval_mode(self.agent):
+                            eval_action = self.agent.select_action(eval_obs)
+                        eval_obs, eval_reward, eval_done, _ = self.eval_env.step(eval_action)
+                        eval_obs = eval_obs['image']
+                        eval_episode_reward += eval_reward
+                    if wandb_log:
+                        wandb.log({"eval_episode_reward": eval_episode_reward}, 
+                                  step=step)
             
             if self.train_flag:
                 if done:
@@ -164,7 +185,6 @@ class Trainer(object):
                     done = False
                     episode_reward = 0
                     episode_step = 0
-                    episode += 1
 
                 # Sample action for data collection
                 if step < self.agent_cfg.init_steps and not self.agent_cfg.pre_trained:
@@ -177,30 +197,39 @@ class Trainer(object):
                 if step >= self.agent_cfg.init_steps:
                     num_updates = self.agent_cfg.init_steps if step == self.agent_cfg.init_steps else 1
                     for _ in range(num_updates):
-                        self.agent.update(self.replay_buffer, step)
+                        # soda에서 auxiliary loss 값도 logging하기 위해 해당 loss를 return하도록 수정했음
+                        soda_loss_value = self.agent.update(self.replay_buffer, step)
+                        if soda_loss_value is not None and wandb_log:
+                            wandb.log({
+                                "loss/soda_aux_loss": soda_loss_value
+                            }, step=logged_epi_idx)
 
                 # Take step
                 next_obs, reward, done, _ = self.env.step(action)
-                done_bool = 0 if episode_step + 1 == self.config['episode_steps'] else float(done)
+                # done_bool = 0 if episode_step + 1 == self.config['episode_steps'] else float(done)
+                done_bool = 0 if episode_step >= max_step_per_episode - 1 else float(done)
                 self.replay_buffer.add(obs, action, reward, next_obs['image'], done_bool)
                 episode_reward += reward
                 obs = next_obs['image']
 
                 if episode_step >= max_step_per_episode - 1:
                     done = True
+                    first_train_update_end = True
                     if wandb_log:
                         wandb.log({
                             "episode_reward": episode_reward
-                        }, step=update_step)
-                    update_step += 1
-                    if best_epi <= episode_reward:
-                        best_epi = episode_reward
+                        }, step=logged_epi_idx)
+                    if best_epi_reward <= episode_reward:
+                        best_epi_reward = episode_reward
                         torch.save(self.agent, f'param/{save_name}/model.pth')
                         print(f"best record updated: {episode_reward}")
+                        self.best_epi_idx = logged_epi_idx
 
-                    if update_step - self.best_update_step >= self.best_after_interval:
-                        self.best_update_step = update_step
+                    if logged_epi_idx - self.best_epi_idx >= self.best_after_interval:
+                        self.best_epi_idx = logged_epi_idx
                         torch.save(self.agent, f'param/{save_name}/best_model_after_{self.best_after_interval}_step.pth')
+
+                    logged_epi_idx += 1
                 
                 episode_step += 1
             
@@ -271,6 +300,8 @@ def main():
 
     # wandb logging
     algorithm = _agent_cfg.algorithm
+    if _agent_cfg.aux_thred:
+        algorithm = algorithm + f" with {_agent_cfg.aux_thred_value} aux_thred"
     if _agent_cfg.pre_trained:
         algorithm = "pre_trained " + algorithm
     aug_name = _agent_cfg.augmentation.first_aug[6:]
