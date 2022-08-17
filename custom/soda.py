@@ -78,15 +78,31 @@ class SODA(SAC):
 			aug_x = self.aug_list[aug_idx](aug_x)
 
 		soda_loss = self.compute_soda_loss(aug_x, x)
-		
-		self.soda_optimizer.zero_grad()
-		soda_loss.backward()
-		self.soda_optimizer.step()
 
-		utils.soft_update_params(
-			self.predictor, self.predictor_target,
-			self.soda_tau
-		)
+		soda_loss_value = soda_loss.clone().detach()
+		
+		if self.cfg.aux_thred:
+			if soda_loss_value >= self.cfg.aux_thred_value:
+				self.soda_optimizer.zero_grad()
+				soda_loss.backward()
+				self.soda_optimizer.step()
+
+				utils.soft_update_params(
+					self.predictor, self.predictor_target,
+					self.soda_tau
+				)
+			else: return soda_loss_value
+		else:
+			self.soda_optimizer.zero_grad()
+			soda_loss.backward()
+			self.soda_optimizer.step()
+
+			utils.soft_update_params(
+				self.predictor, self.predictor_target,
+				self.soda_tau
+			)
+
+		return soda_loss_value
 
 	def update(self, replay_buffer, step):
 		obs, action, reward, next_obs, not_done = replay_buffer.sample()
@@ -100,4 +116,7 @@ class SODA(SAC):
 			self.soft_update_critic_target()
 
 		if step % self.aux_update_freq == 0:
-			self.update_soda(replay_buffer, step)
+			soda_loss_value = self.update_soda(replay_buffer, step)
+			return soda_loss_value
+
+		return None
