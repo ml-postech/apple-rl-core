@@ -19,13 +19,14 @@ from environments import make_environment
 
 sys.path.append("./custom")
 import custom.utils as utils
+import custom.augmentations as augmentations
 
 _soda_cfg_dict: dict = {
     "algorithm": "soda",
     "aux_thred": False,
-    "aux_thred_value": 0,
+    "aux_thred_value": 0.0005,
     "train": True,
-    "eval": True,
+    "eval": False,
     "eval_freq": 5,
     "pre_trained": False,
     "pre_trained_dir": "/home/guest-cch/apple-rl-core/param/soda , _crop_overlay , walker , None , static , 2022-08-15T08:09",
@@ -83,6 +84,11 @@ _soda_cfg_dict: dict = {
 _soda_cfg = OmegaConf.create(_soda_cfg_dict)
 
 wandb_log = True
+
+aug_dict = {"random_crop": augmentations.random_crop,
+			"random_overlay": augmentations.random_overlay,
+			"random_conv": augmentations.random_conv,
+			"random_shift": augmentations.random_shift,}
 
 
 class Trainer(object):
@@ -199,9 +205,13 @@ class Trainer(object):
                     for _ in range(num_updates):
                         # soda에서 auxiliary loss 값도 logging하기 위해 해당 loss를 return하도록 수정했음
                         soda_loss_value = self.agent.update(self.replay_buffer, step)
+                        obs_tensor = torch.Tensor(obs)
+                        obs_tensor = obs_tensor.to(torch.device('cuda'))
+                        soda_advantage_diff = self.agent.advantage_diff(obs_tensor)
                         if soda_loss_value is not None and wandb_log:
                             wandb.log({
-                                "loss/soda_aux_loss": soda_loss_value
+                                "loss/soda_aux_loss": soda_loss_value,
+                                "loss/soda_advantage_diff": soda_advantage_diff
                             }, step=logged_epi_idx)
 
                 # Take step
