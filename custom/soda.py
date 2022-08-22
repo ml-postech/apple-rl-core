@@ -120,3 +120,23 @@ class SODA(SAC):
 			return soda_loss_value
 
 		return None
+
+	def advantage_diff(self, obs):
+		with torch.no_grad():
+			obs = torch.unsqueeze(obs, dim=0)
+			_, action, log_pi, _ = self.actor(obs)
+			aug_obs = obs.clone()
+			for aug_idx in range(self.cfg.augmentation.aug_num):
+				aug_obs = self.aug_list[aug_idx](aug_obs)
+
+			Q1, Q2 = self.critic(obs, action)
+
+			aug_obs = torch.mean(aug_obs, 0, True)
+			aug_Q1, aug_Q2 = self.critic(aug_obs, action)
+
+			_, _, aug_log_pi, _ = self.actor(aug_obs)
+
+			V = torch.min(Q1, Q2) - self.alpha.detach() * log_pi
+			aug_V = torch.min(aug_Q1, aug_Q2) - self.alpha.detach() * aug_log_pi
+
+			return torch.abs((torch.min(Q1, Q2) - V) - (torch.min(aug_Q1, aug_Q2) - aug_V))
